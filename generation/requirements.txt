@@ -19,3 +19,4 @@ gradio==4.19.2
 open-clip-torch==2.24.0
 plyfile==1.0.3
 loguru==0.7.2
+open3d==0.18.0

@@ -9,7 +9,7 @@ mesh:
 # estimated elevation angle for input image 
 elevation: 0
 # reference image resolution
-ref_size: 256
+ref_size: 384
 # density thresh for mesh extraction
 density_thresh: 1
 
@@ -28,10 +28,10 @@ stablediff: False
 # use stable-zero123 instead of zero123-xl
 stable_zero123: False
 # use zero123-xl
-zero123_xl: False
+zero123_xl: True
 # guidance loss weights (0 to disable)
 lambda_sd: 1
-lambda_zero123: 0
+lambda_zero123: 0.5
 # warmup rgb supervision for image-to-3d
 warmup_rgb_loss: True
 # training batch size per iter
@@ -65,7 +65,7 @@ H: 800
 W: 800
 
 ### Gaussian splatting
-num_pts: 5000
+num_pts: 8000
 sh_degree: 0
 position_lr_init: 0.001
 position_lr_final: 0.00002
