@@ -9,9 +9,9 @@ mesh:
 # estimated elevation angle for input image 
 elevation: 0
 # reference image resolution
-ref_size: 384
+ref_size: 256
 # density thresh for mesh extraction
-density_thresh: 1
+density_thresh: 0.8 # 1
 
 ### Output
 outdir: logs
@@ -31,17 +31,17 @@ stable_zero123: False
 zero123_xl: True
 # guidance loss weights (0 to disable)
 lambda_sd: 1
-lambda_zero123: 0.5
+lambda_zero123: 0.5 # 0.5
 # warmup rgb supervision for image-to-3d
 warmup_rgb_loss: True
 # training batch size per iter
-batch_size: 1
+batch_size: 1 # 1
 # training iterations for stage 1
-iters: 1000
+iters: 500 # 1000
 # whether to linearly anneal timestep
 anneal_timestep: True
 # training iterations for stage 2
-iters_refine: 50
+iters_refine: 50 # 50
 # training camera radius
 radius: 3.5 #2.5
 # training camera fovy
@@ -65,13 +65,13 @@ H: 800
 W: 800
 
 ### Gaussian splatting
-num_pts: 8000
-sh_degree: 0
-position_lr_init: 0.001
+num_pts: 5000 # 5000
+sh_degree: 1 # 0
+position_lr_init: 0.001 # 0.001
 position_lr_final: 0.00002
 position_lr_delay_mult: 0.02
 position_lr_max_steps: 300
-feature_lr: 0.01
+feature_lr: 0.011 # 0.01
 opacity_lr: 0.05
 scaling_lr: 0.005
 rotation_lr: 0.005
