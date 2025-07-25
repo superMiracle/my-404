@@ -19,14 +19,75 @@ NETWORK_DELAY_TIME_BUFFER = 60
 FAILED_VALIDATOR_DELAY = 300
 
 
+async def validate_result(validation_endpoint: str, prompt: str, data: str) -> float | None:
+    validate_url = urllib.parse.urljoin(validation_endpoint, "/validate_txt_to_3d_ply/")
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.post(validate_url, json={"prompt": prompt, "data": data, "compression": 2}) as response:
+                if response.status == 200:
+                    results = await response.json()
+                    return float(results["score"])
+        except Exception as e:
+            bt.logging.error(f"Validation error: {e}")
+    return None
+
+
 async def worker_routine(
     endpoint: str, wallet: bt.wallet, metagraph: bt.metagraph, validator_selector: ValidatorSelector
 ) -> None:
     bt.logging.info(f"Worker ({endpoint}) started")
     generate_url = urllib.parse.urljoin(endpoint, "/generate/")
 
+    # Import config here to get validation settings
+    from miner.config import read_config
+    config = read_config()
+    validation_endpoint = config.validation.endpoint
+    quality_threshold = config.validation.quality_threshold
+
     while True:
-        await _complete_one_task(generate_url, wallet, metagraph, validator_selector)
+        validator_uid = validator_selector.get_next_validator_to_query()
+        if validator_uid is None:
+            await asyncio.sleep(10.0)
+            continue
+
+        # Setting cooldown to prevent selecting the same validator for concurrent task.
+        validator_selector.set_cooldown(validator_uid, int(time.time()) + 300)
+
+        async with bt.dendrite(wallet=wallet) as dendrite:
+            pull = await _pull_task(dendrite, metagraph, validator_uid)
+            if pull.dendrite.status_code != 200:
+                bt.logging.warning(
+                    f"Failed to get task from [{validator_uid}]. Reason: {pull.dendrite.status_message}."
+                )
+                validator_selector.set_cooldown(validator_uid, int(time.time()) + FAILED_VALIDATOR_DELAY)
+                continue
+
+        if pull.task is None:
+            if pull.cooldown_until == 0:
+                bt.logging.warning(f"Failed to get task from [{validator_uid}]. Reason: Unknown.")
+                validator_selector.set_cooldown(validator_uid, int(time.time()) + FAILED_VALIDATOR_DELAY)
+            else:
+                cooldown_left = max(0, int(pull.cooldown_until - time.time()))
+                bt.logging.debug(
+                    f"Miner is on cooldown for the next: {cooldown_left} sec. "
+                    f"Total cooldown violations: {pull.cooldown_violations}"
+                )
+                validator_selector.set_cooldown(validator_uid, pull.cooldown_until)
+            continue
+
+        bt.logging.debug(f"Task received. Prompt: {pull.task.prompt}.")
+
+        results = await _generate(generate_url, pull.task.prompt) or b""
+
+        # Validate result before submitting
+        if results:
+            encoded_results = base64.b64encode(results).decode(encoding="utf-8")
+            
+            asyncio.create_task(_submit_and_log(wallet, metagraph, validator_uid, pull, results, validator_selector))
+            
+        else:
+            bt.logging.info("No results generated, submitting empty results.")
+            asyncio.create_task(_submit_and_log(wallet, metagraph, validator_uid, pull, b'', validator_selector))
 
 
 async def _complete_one_task(
@@ -44,14 +105,14 @@ async def _complete_one_task(
         pull = await _pull_task(dendrite, metagraph, validator_uid)
         if pull.dendrite.status_code != 200:
             bt.logging.warning(
-                f"Failed to get task from [{metagraph.hotkeys[validator_uid]}]. Reason: {pull.dendrite.status_message}."
+                f"Failed to get task from [{validator_uid}]. Reason: {pull.dendrite.status_message}."
             )
             validator_selector.set_cooldown(validator_uid, int(time.time()) + FAILED_VALIDATOR_DELAY)
             return
 
     if pull.task is None:
         if pull.cooldown_until == 0:
-            bt.logging.warning(f"Failed to get task from [{metagraph.hotkeys[validator_uid]}]. Reason: Unknown.")
+            bt.logging.warning(f"Failed to get task from [{validator_uid}]. Reason: Unknown.")
             validator_selector.set_cooldown(validator_uid, int(time.time()) + FAILED_VALIDATOR_DELAY)
         else:
             cooldown_left = max(0, int(pull.cooldown_until - time.time()))
@@ -100,6 +161,11 @@ async def _submit_results(
     pull: PullTask,
     results: bytes,
 ) -> SubmitResults:
+    from miner.config import read_config
+    config = read_config()
+    validation_endpoint = config.validation.endpoint
+    quality_threshold = config.validation.quality_threshold
+    
     submit_time = time.time_ns()
     prompt = pull.task.prompt if pull.task is not None else None
     message = (
@@ -109,8 +175,16 @@ async def _submit_results(
     signature = base64.b64encode(dendrite.keypair.sign(message)).decode(encoding="utf-8")
     if results:
         compressed_results = base64.b64encode(pyspz.compress(results, workers=-1)).decode(encoding="utf-8")
+        validation_score = await validate_result(validation_endpoint, pull.task.prompt, compressed_results)
+        
+        if validation_score is not None and validation_score >= quality_threshold:
+            bt.logging.info(f"Validation passed (score: {validation_score}), submitting result.")
+        else:
+            bt.logging.info(f"Validation failed or below threshold (score: {validation_score}, threshold: {quality_threshold}), submitting empty results.")
+            compressed_results = ""  # Skipping task not to be penalized (same could be done for low quality results)
     else:
         compressed_results = ""  # Skipping task not to be penalized (same could be done for low quality results)
+        
     synapse = SubmitResults(task=pull.task, results=compressed_results, submit_time=submit_time, signature=signature)
     response = typing.cast(
         SubmitResults,
@@ -135,6 +209,20 @@ def _log_feedback(validator_uid: int, submit: SubmitResults) -> None:
         f"Accepted results (last 4h): {feedback.generations_within_the_window}. "
         f"Reward: {feedback.current_miner_reward}."
     )
+
+
+async def _submit_and_log(wallet, metagraph, validator_uid, pull, results, validator_selector):
+    async with bt.dendrite(wallet=wallet) as dendrite:
+        submit = await _submit_results(wallet, dendrite, metagraph, validator_uid, pull, results)
+        if submit.feedback is None:
+            bt.logging.warning(
+                f"Failed to submit results to [{metagraph.hotkeys[validator_uid]}]. "
+                f"Reason: {submit.dendrite.status_message}."
+            )
+            validator_selector.set_cooldown(validator_uid, int(time.time()) + FAILED_VALIDATOR_DELAY)
+            return
+    _log_feedback(validator_uid, submit)
+    validator_selector.set_cooldown(validator_uid, submit.cooldown_until)
 
 
 async def _generate(generate_url: str, prompt: str, timeout: float | None = None) -> bytes | None:  # noqa: ASYNC109

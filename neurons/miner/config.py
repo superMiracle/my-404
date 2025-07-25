@@ -45,4 +45,18 @@ def read_config() -> bt.config:
         default=["http://127.0.0.1:8093"],
     )
 
+    parser.add_argument(
+        "--validation.endpoint",
+        type=str,
+        help="Specifies the URL of the endpoint responsible for scoring 3D assets. This endpoint should handle the /validate/ POST route.",
+        default="http://127.0.0.1:8094",
+    )
+    parser.add_argument(
+        "--validation.quality_threshold",
+        type=float,
+        help="Minimum score required for task results to be accepted for submission.",
+        default=0.6,
+    )
+
+
     return bt.config(parser)

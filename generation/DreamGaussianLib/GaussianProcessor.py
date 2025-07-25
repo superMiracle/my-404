@@ -143,11 +143,19 @@ class GaussianProcessor:
         with torch.no_grad():
             if self._enable_sd:
                 if self._opt.imagedream:
-                    self._guidance_sd.get_image_text_embeds(
-                        self._input_img_torch,
-                        [self._prompt],
-                        [self._negative_prompt],
-                    )
+                    if self._input_img_torch is not None:
+                        self._guidance_sd.get_image_text_embeds(
+                            self._input_img_torch,
+                            [self._prompt],
+                            [self._negative_prompt],
+                        )
+                    else:
+                        dummy_image = torch.zeros((1, 3, 256, 256), device=self._device)
+                        self._guidance_sd.get_image_text_embeds(
+                            dummy_image,
+                            [self._prompt],
+                            [self._negative_prompt],
+                        )
                 else:
                     self._guidance_sd.get_text_embeds([self._prompt], [self._negative_prompt])
 
@@ -314,11 +322,13 @@ class GaussianProcessor:
                             images,
                             poses,
                             step_ratio=step_ratio if self._opt.anneal_timestep else None,
+                            guidance_scale=self._opt.guidance_scale,
                         )
                     else:
                         loss = loss + self._opt.lambda_sd * self._guidance_sd.train_step(
                             images,
                             step_ratio=step_ratio if self._opt.anneal_timestep else None,
+                            guidance_scale=self._opt.guidance_scale,
                         )
 
                 if self._enable_zero123:

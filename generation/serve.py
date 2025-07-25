@@ -1,5 +1,4 @@
 from io import BytesIO
-import tempfile
 
 from fastapi import FastAPI, Depends, Form
 from fastapi.responses import Response, StreamingResponse
@@ -14,8 +13,6 @@ from loguru import logger
 from DreamGaussianLib import ModelsPreLoader
 from DreamGaussianLib.GaussianProcessor import GaussianProcessor
 from video_utils import VideoUtils
-
-import open3d as o3d
 
 
 def get_args():
@@ -56,46 +53,12 @@ async def generate(
     t1 = time()
     logger.info(f" Generation took: {(t1 - t0) / 60.0} min")
 
-    # --- Mesh post-processing with Open3D, fallback to original on error ---
-    with tempfile.NamedTemporaryFile(suffix=".ply") as tmp:
-        # Save the generated mesh to a temp file
-        gaussian_processor.get_gs_model().save_ply(tmp.name)
-        tmp.flush()
-        try:
-            import traceback
-            import sys
-            # Load with Open3D
-            mesh = o3d.io.read_triangle_mesh(tmp.name)
-            logger.info(f"Mesh loaded: Vertices={len(mesh.vertices)}, Triangles={len(mesh.triangles)}")
-            if len(mesh.vertices) == 0 or len(mesh.triangles) == 0:
-                logger.error("Mesh is invalid (no vertices or triangles). Returning original mesh.")
-                tmp.seek(0)
-                buffer = tmp.read()
-            else:
-                mesh.remove_duplicated_vertices()
-                mesh.remove_duplicated_triangles()
-                mesh.remove_non_manifold_edges()
-                mesh = mesh.filter_smooth_simple(number_of_iterations=2)
-                mesh.remove_degenerate_triangles()
-                logger.info(f"After cleaning: Vertices={len(mesh.vertices)}, Triangles={len(mesh.triangles)}")
-                if len(mesh.vertices) == 0 or len(mesh.triangles) == 0:
-                    logger.error("Mesh became invalid after cleaning. Returning original mesh.")
-                    tmp.seek(0)
-                    buffer = tmp.read()
-                else:
-                    # Save cleaned mesh back to temp file
-                    o3d.io.write_triangle_mesh(tmp.name, mesh)
-                    tmp.seek(0)
-                    buffer = tmp.read()
-                    logger.info("Mesh cleaning and smoothing succeeded.")
-        except Exception as e:
-            logger.error(f"Open3D mesh cleaning failed: {e}\n{traceback.format_exc()}")
-            # Fallback: return the original mesh
-            tmp.seek(0)
-            buffer = tmp.read()
-            logger.info("Returned original mesh due to cleaning failure.")
+    buffer = BytesIO()
+    gaussian_processor.get_gs_model().save_ply(buffer)
+    buffer.seek(0)
+    buffer = buffer.getbuffer()
     t2 = time()
-    logger.info(f" Saving, cleaning, and encoding took: {(t2 - t1) / 60.0} min")
+    logger.info(f" Saving and encoding took: {(t2 - t1) / 60.0} min")
 
     return Response(buffer, media_type="application/octet-stream")
 
