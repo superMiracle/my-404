@@ -13,6 +13,8 @@ class ValidatorSelector:
         self._min_stake = min_stake
         self._cooldowns: dict[int | None, int] = {}
         self._next_uid = 0
+        self._blacklist: set[int] = set()  # Add blacklist set
+        self._whitelist: set[int] = set([49, 128, 27, 124])  # Add whitelist set
 
         # Temporary measure.
         # For test period organic traffic will go only through the subnet owner's validator.
@@ -25,6 +27,16 @@ class ValidatorSelector:
         else:
             self._owner_uid = metagraph.hotkeys.index(self._owner_hotkey)
 
+    def set_blacklist(self, blacklist: set[int]) -> None:
+        """Set the blacklist of validator UIDs to avoid."""
+        self._blacklist = set(blacklist)
+
+    def add_to_blacklist(self, uid: int) -> None:
+        self._blacklist.add(uid)
+
+    def remove_from_blacklist(self, uid: int) -> None:
+        self._blacklist.discard(uid)
+
     def get_next_validator_to_query(self) -> int | None:
         current_time = int(time.time())
         metagraph: bt.metagraph = self._metagraph_ref()
@@ -36,6 +48,7 @@ class ValidatorSelector:
         start_uid = self._next_uid
         while True:
             if (
+                self._next_uid not in self._blacklist and  # Skip blacklisted UIDs
                 metagraph.axons[self._next_uid].is_serving
                 and metagraph.S[self._next_uid] >= self._min_stake
                 and self._cooldowns.get(self._next_uid, 0) < current_time

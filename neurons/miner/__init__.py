@@ -61,6 +61,9 @@ class Miner:
         )
 
         self.validator_selector = ValidatorSelector(self.metagraph, self.config.neuron.min_stake_to_set_weights)
+        # Blacklist validator UID 180 (WC)
+        self.validator_selector.add_to_blacklist(180)
+        self.validator_selector.add_to_blacklist(27)
 
     def _self_check_for_registration(self) -> None:
         if not self.subtensor.is_hotkey_registered(
