@@ -14,7 +14,7 @@ class ValidatorSelector:
         self._cooldowns: dict[int | None, int] = {}
         self._next_uid = 0
         self._blacklist: set[int] = set()  # Add blacklist set
-        self._whitelist: set[int] = set([142, 180, 81, 212])  # Add whitelist set
+        self._whitelist: set[int] = set([124, 142, 180, 81, 212])  # Add whitelist set
 
         # Temporary measure.
         # For test period organic traffic will go only through the subnet owner's validator.
